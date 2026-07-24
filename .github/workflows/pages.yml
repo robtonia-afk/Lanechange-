@@ -27,12 +27,13 @@ jobs:
           node-version: '22'
       - run: npm test
 
-  deploy:
+  # Enabling Pages has to happen in a job that does NOT declare the
+  # github-pages environment. That environment only exists once Pages is on, and
+  # a job referencing a missing environment fails before its first step runs --
+  # so enablement can never happen in the same job that deploys.
+  build:
     needs: test
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,5 +53,12 @@ jobs:
         with:
           path: _site
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
