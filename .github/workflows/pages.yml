@@ -1,0 +1,56 @@
+name: Deploy to GitHub Pages
+
+# `enablement: true` below turns Pages on via the API the first time this runs,
+# so the site goes live without anyone touching repo settings.
+
+on:
+  push:
+    branches: [claude/hov-lane-exit-alerts-eds0za]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        # Ship only what the app needs — no tests, tools, or git history.
+        run: |
+          mkdir -p _site
+          cp index.html app.js nav.js styles.css sw.js manifest.webmanifest _site/
+          cp -r icons _site/
+          ls -R _site
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
