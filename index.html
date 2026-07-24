@@ -37,6 +37,7 @@
 
   <div class="live-foot">
     <div class="pill" id="gpsPill">GPS: acquiring…</div>
+    <div class="pill warn" id="simPill" hidden>Simulation</div>
     <div class="pill" id="wakePill" hidden>Screen lock off</div>
     <button type="button" class="ghost small" id="testVoiceBtn">Test voice</button>
   </div>
@@ -77,8 +78,11 @@
     <div class="selected-name" id="selectedName">—</div>
     <div class="selected-meta" id="selectedMeta">—</div>
     <button type="button" class="primary wide" id="startBtn">Start alerts</button>
+    <button type="button" class="ghost wide" id="simulateBtn">Simulate the drive in</button>
     <p class="hint">
       Mount the phone and keep this screen up. It will speak the warnings out loud.
+      The simulation runs a fake approach at 67 mph so you can hear all of it
+      without leaving the driveway.
     </p>
   </section>
 

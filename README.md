@@ -50,6 +50,19 @@ HTTPS is required — GPS is disabled on plain `http://` — which Pages gives y
 for free. It must be Safari for the install step; Chrome on iOS can't add to the
 home screen.
 
+## Trying it without driving
+
+Pick an exit, then tap **Simulate the drive in**. It replays a scripted 67 mph
+approach through the same pipeline the real GPS feed uses, at 5x, so you get
+every chime and spoken warning in about a minute from a parked car. A
+"Simulation" pill marks the screen so it can't be mistaken for the real thing.
+
+For a real-GPS test without a freeway, shrink the warning distances to
+`0.25` / `0.15` / `0.12` mi with times of `20` / `12` / `5` sec, walk a few
+hundred metres away, tap **Save the spot I'm at right now**, and walk back.
+Keep every distance above `0.1` mi — the "at your exit" radius is a fixed 150 m,
+and thresholds below it get swallowed.
+
 ## Before your first real drive
 
 - **Turn off Auto-Lock** (Settings → Display & Brightness → Auto-Lock → Never)
@@ -99,10 +112,16 @@ yours.
 ## Development
 
 ```sh
-node --test tests/nav.test.mjs   # navigation math and alert logic
-python3 tools/make_icons.py      # regenerate the app icons
-npx http-server -p 8099 .        # serve locally (GPS needs localhost or HTTPS)
+npm test          # navigation math and alert logic (20 tests)
+npm run serve     # http://127.0.0.1:8099 — localhost counts as secure, so GPS works
+npm run icons     # regenerate the app icons
+npm run build     # bundle everything into dist/lanechange.html
 ```
+
+`npm run build` inlines the CSS, both scripts, and the icon into a single
+self-contained HTML file with no external requests — handy for AirDropping to
+the phone or hosting somewhere that only takes one file. The multi-file version
+at the repo root stays the source of truth; `dist/` is derived and gitignored.
 
 `nav.js` holds all the pure logic — distance, closing speed, ETA, stage
 escalation, announcement text — and has no DOM dependencies, which is what

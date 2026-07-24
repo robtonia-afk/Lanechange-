@@ -36,6 +36,27 @@ export function bearing(a, b) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+/**
+ * The point `meters` away from `origin` along `bearingDeg`.
+ * Used to synthesise an approach for the simulator.
+ */
+export function destinationPoint(origin, bearingDeg, meters) {
+  const d = meters / EARTH_RADIUS_M;
+  const brg = toRad(bearingDeg);
+  const lat1 = toRad(origin.lat);
+  const lon1 = toRad(origin.lon);
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brg),
+  );
+  const lon2 =
+    lon1 +
+    Math.atan2(
+      Math.sin(brg) * Math.sin(d) * Math.cos(lat1),
+      Math.cos(d) - Math.sin(lat1) * Math.sin(lat2),
+    );
+  return { lat: toDeg(lat2), lon: ((toDeg(lon2) + 540) % 360) - 180 };
+}
+
 /** Smallest absolute angle between two bearings, 0..180 degrees. */
 export function angleBetween(a, b) {
   const d = Math.abs(((a - b) % 360) + 360) % 360;

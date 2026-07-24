@@ -5,6 +5,7 @@ import {
   METERS_PER_MILE,
   haversine,
   bearing,
+  destinationPoint,
   angleBetween,
   stageFor,
   ApproachTracker,
@@ -35,6 +36,14 @@ test('bearing points the right way', () => {
   assert.ok(Math.abs(bearing(north(EXIT, 500), EXIT) - 180) < 1);
   assert.equal(angleBetween(350, 10), 20);
   assert.equal(angleBetween(10, 350), 20);
+});
+
+test('destinationPoint is the inverse of haversine and bearing', () => {
+  for (const brg of [0, 47, 135, 200, 340]) {
+    const p = destinationPoint(EXIT, brg, 3000);
+    assert.ok(Math.abs(haversine(EXIT, p) - 3000) < 1, `distance on bearing ${brg}`);
+    assert.ok(Math.abs(bearing(EXIT, p) - brg) < 0.5, `bearing ${brg}`);
+  }
 });
 
 test('stageFor escalates on distance alone', () => {

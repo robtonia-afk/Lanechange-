@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node --test tests/nav.test.mjs",
     "serve": "npx http-server -p 8099 .",
-    "icons": "python3 tools/make_icons.py"
+    "icons": "python3 tools/make_icons.py",
+    "build": "python3 tools/build_single.py"
   },
   "license": "MIT"
 }

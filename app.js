@@ -8,6 +8,7 @@ import {
   formatDistance,
   formatDuration,
   formatSpeed,
+  destinationPoint,
   haversine,
   parseCoordinates,
   severity,
@@ -46,6 +47,8 @@ const el = {
   speed: $('speed'),
   gpsPill: $('gpsPill'),
   wakePill: $('wakePill'),
+  simulateBtn: $('simulateBtn'),
+  simPill: $('simPill'),
   testVoiceBtn: $('testVoiceBtn'),
   toast: $('toast'),
   settingsDetails: $('settingsDetails'),
@@ -67,6 +70,7 @@ const state = {
   tracker: null,
   director: null,
   watchId: null,
+  simTimer: null,
   wakeLock: null,
   lastFixAt: null,
   staleTimer: null,
@@ -268,23 +272,19 @@ async function cachedPosition() {
 /* ------------------------------------------------------------------ */
 
 el.startBtn.addEventListener('click', start);
+el.simulateBtn.addEventListener('click', startSimulation);
 el.stopBtn.addEventListener('click', stop);
 el.testVoiceBtn.addEventListener('click', () => {
   chime('moveNow');
   speak('Get out of the H O V lane now.');
 });
 
-function start() {
-  if (!state.target) return;
-  if (!navigator.geolocation) {
-    toast('This browser has no GPS access.');
-    return;
-  }
-
-  // Both of these have to be unlocked inside the tap that starts tracking,
+/** Shared setup for a real drive and a simulated one. */
+function beginSession(opening) {
+  // Audio and speech have to be unlocked inside the tap that starts things,
   // or iOS stays silent for the rest of the drive.
   primeAudio();
-  speak(`Tracking ${state.target.name}. I'll tell you when to move over.`);
+  speak(opening);
 
   state.tracker = new ApproachTracker(state.target);
   state.director = new AlertDirector(state.settings);
@@ -298,6 +298,17 @@ function start() {
   el.speed.textContent = '—';
   el.live.hidden = false;
   el.setup.hidden = true;
+}
+
+function start() {
+  if (!state.target) return;
+  if (!navigator.geolocation) {
+    toast('This browser has no GPS access.');
+    return;
+  }
+
+  el.simPill.hidden = true;
+  beginSession(`Tracking ${state.target.name}. I'll tell you when to move over.`);
 
   state.watchId = navigator.geolocation.watchPosition(onFix, onFixError, {
     enableHighAccuracy: true,
@@ -309,11 +320,48 @@ function start() {
   requestWakeLock();
 }
 
+/**
+ * Replay a scripted 67 mph approach through the exact same pipeline the real
+ * GPS feed uses, at 5x, so the alerts can be checked from a parked car.
+ */
+function startSimulation() {
+  if (!state.target) return;
+
+  el.simPill.hidden = false;
+  beginSession(`Simulating the approach to ${state.target.name}.`);
+  el.gpsPill.textContent = 'GPS: simulated';
+
+  const SPEED = 30; // m/s, about 67 mph
+  const start = Math.max(state.settings.headsUpMeters * 1.4, 1200);
+  let remaining = start;
+  let clock = Date.now();
+
+  state.simTimer = setInterval(() => {
+    if (remaining < -450) {
+      stop();
+      toast('Simulation finished.');
+      return;
+    }
+    // Approach from the south so the synthetic track is a straight run in.
+    const here = destinationPoint(state.target, 180, Math.abs(remaining));
+    const point = remaining >= 0 ? here : destinationPoint(state.target, 0, -remaining);
+    clock += 1000;
+    onFix({
+      coords: { latitude: point.lat, longitude: point.lon, speed: SPEED, accuracy: 6, heading: 0 },
+      timestamp: clock,
+    });
+    remaining -= SPEED;
+  }, 200);
+}
+
 function stop() {
   if (state.watchId != null) navigator.geolocation.clearWatch(state.watchId);
   state.watchId = null;
   clearInterval(state.staleTimer);
   state.staleTimer = null;
+  clearInterval(state.simTimer);
+  state.simTimer = null;
+  el.simPill.hidden = true;
   releaseWakeLock();
   try { speechSynthesis.cancel(); } catch { /* not supported */ }
   el.live.hidden = true;
