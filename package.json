@@ -1,0 +1,13 @@
+{
+  "name": "lanechange",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GPS alerts telling you when to get out of the HOV lane before your exit.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/nav.test.mjs",
+    "serve": "npx http-server -p 8099 .",
+    "icons": "python3 tools/make_icons.py"
+  },
+  "license": "MIT"
+}

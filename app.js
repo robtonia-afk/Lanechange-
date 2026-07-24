@@ -1,0 +1,584 @@
+import {
+  METERS_PER_MILE,
+  DEFAULT_SETTINGS,
+  ApproachTracker,
+  AlertDirector,
+  STAGE_LABELS,
+  announcementFor,
+  formatDistance,
+  formatDuration,
+  formatSpeed,
+  haversine,
+  parseCoordinates,
+  severity,
+} from './nav.js';
+
+const STORE = {
+  settings: 'lanechange.settings.v1',
+  places: 'lanechange.places.v1',
+  target: 'lanechange.target.v1',
+};
+
+/** Search hits farther out than this are almost certainly a same-named exit elsewhere. */
+const PLAUSIBLE_DRIVE_METERS = 200_000;
+
+const $ = (id) => document.getElementById(id);
+
+const el = {
+  setup: $('setup'),
+  live: $('live'),
+  searchForm: $('searchForm'),
+  searchInput: $('searchInput'),
+  searchBtn: $('searchBtn'),
+  results: $('results'),
+  hereBtn: $('hereBtn'),
+  savedCard: $('savedCard'),
+  saved: $('saved'),
+  selectedCard: $('selectedCard'),
+  selectedName: $('selectedName'),
+  selectedMeta: $('selectedMeta'),
+  startBtn: $('startBtn'),
+  stopBtn: $('stopBtn'),
+  liveTarget: $('liveTarget'),
+  banner: $('banner'),
+  distance: $('distance'),
+  eta: $('eta'),
+  speed: $('speed'),
+  gpsPill: $('gpsPill'),
+  wakePill: $('wakePill'),
+  testVoiceBtn: $('testVoiceBtn'),
+  toast: $('toast'),
+  settingsDetails: $('settingsDetails'),
+  voiceToggle: $('voiceToggle'),
+  chimeToggle: $('chimeToggle'),
+  metricToggle: $('metricToggle'),
+};
+
+const SETTING_FIELDS = [
+  { meters: 'headsUpMeters', secs: 'headsUpSec', distInput: 'headsUpMiles', secInput: 'headsUpSec' },
+  { meters: 'moveNowMeters', secs: 'moveNowSec', distInput: 'moveNowMiles', secInput: 'moveNowSec' },
+  { meters: 'finalMeters', secs: 'finalSec', distInput: 'finalMiles', secInput: 'finalSec' },
+];
+
+const state = {
+  settings: loadJSON(STORE.settings, DEFAULT_SETTINGS),
+  places: loadJSON(STORE.places, []),
+  target: loadJSON(STORE.target, null),
+  tracker: null,
+  director: null,
+  watchId: null,
+  wakeLock: null,
+  lastFixAt: null,
+  staleTimer: null,
+  audio: null,
+  lastKnown: null,
+};
+state.settings = { ...DEFAULT_SETTINGS, ...state.settings };
+
+/* ------------------------------------------------------------------ */
+/* Storage                                                             */
+/* ------------------------------------------------------------------ */
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private browsing / quota — the app still works for this trip */
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Places                                                              */
+/* ------------------------------------------------------------------ */
+
+const sameSpot = (a, b) => a && b && haversine(a, b) < 60;
+
+function rememberPlace(place) {
+  state.places = [place, ...state.places.filter((p) => !sameSpot(p, place))].slice(0, 25);
+  saveJSON(STORE.places, state.places);
+  renderSaved();
+}
+
+function forgetPlace(index) {
+  state.places.splice(index, 1);
+  saveJSON(STORE.places, state.places);
+  renderSaved();
+}
+
+function selectTarget(place) {
+  state.target = place;
+  saveJSON(STORE.target, place);
+  rememberPlace(place);
+  renderSelected();
+  el.selectedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/* ------------------------------------------------------------------ */
+/* Search                                                              */
+/* ------------------------------------------------------------------ */
+
+el.searchForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const query = el.searchInput.value.trim();
+  if (!query) return;
+
+  const coords = parseCoordinates(query);
+  if (coords) {
+    selectTarget({ ...coords, name: `${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}`, meta: 'Pasted coordinates' });
+    el.results.hidden = true;
+    return;
+  }
+
+  el.searchBtn.disabled = true;
+  el.searchBtn.textContent = '…';
+  try {
+    const places = await geocode(query);
+    renderResults(places);
+  } catch (error) {
+    toast(navigator.onLine ? 'Search failed. Try again.' : 'Search needs a connection — saved exits still work offline.');
+    console.error(error);
+  } finally {
+    el.searchBtn.disabled = false;
+    el.searchBtn.textContent = 'Search';
+  }
+});
+
+async function geocode(query) {
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('limit', '8');
+  url.searchParams.set('addressdetails', '1');
+
+  // Bias toward where the phone already is, when we know it, so "exit 26"
+  // finds the one on your commute rather than one three states away.
+  const near = await cachedPosition();
+  if (near) {
+    const pad = 1.5;
+    url.searchParams.set(
+      'viewbox',
+      [near.lon - pad, near.lat + pad, near.lon + pad, near.lat - pad].join(','),
+    );
+  }
+
+  const response = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Nominatim ${response.status}`);
+  const raw = await response.json();
+
+  const places = raw.map((item) => {
+    const parts = String(item.display_name || '').split(', ');
+    return {
+      lat: Number(item.lat),
+      lon: Number(item.lon),
+      name: item.name || parts[0] || 'Unnamed place',
+      meta: parts.slice(1, 4).join(', '),
+    };
+  });
+
+  if (!near) return places;
+
+  // Nominatim's own ranking is better at "which of these is an exit" than
+  // distance is, so keep its order -- but push anything too far away to be on
+  // today's drive below the rest, which is what separates the Exit 26 near you
+  // from the identically named one three states over.
+  for (const p of places) p.away = haversine(near, p);
+  const plausible = places.filter((p) => p.away <= PLAUSIBLE_DRIVE_METERS);
+  const distant = places.filter((p) => p.away > PLAUSIBLE_DRIVE_METERS);
+  return [...plausible, ...distant];
+}
+
+function renderResults(places) {
+  el.results.innerHTML = '';
+  if (!places.length) {
+    el.results.hidden = true;
+    toast('Nothing found. Try the cross-street at the end of the ramp.');
+    return;
+  }
+  for (const place of places) {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    const meta = [place.meta, place.away != null ? `${formatDistance(place.away, state.settings.units)} away` : null]
+      .filter(Boolean)
+      .join(' • ');
+    button.innerHTML = `<div class="result-name"></div><div class="result-meta"></div>`;
+    button.querySelector('.result-name').textContent = place.name;
+    button.querySelector('.result-meta').textContent = meta;
+    button.addEventListener('click', () => {
+      selectTarget({ lat: place.lat, lon: place.lon, name: place.name, meta: place.meta });
+      el.results.hidden = true;
+      el.results.innerHTML = '';
+    });
+    li.append(button);
+    el.results.append(li);
+  }
+  el.results.hidden = false;
+}
+
+el.hereBtn.addEventListener('click', () => {
+  el.hereBtn.disabled = true;
+  el.hereBtn.textContent = 'Getting a fix…';
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      el.hereBtn.disabled = false;
+      el.hereBtn.textContent = "Save the spot I'm at right now";
+      const { latitude: lat, longitude: lon } = position.coords;
+      const name = prompt('Name this exit', 'My exit');
+      if (name === null) return;
+      selectTarget({ lat, lon, name: name.trim() || 'My exit', meta: 'Saved from GPS' });
+    },
+    (error) => {
+      el.hereBtn.disabled = false;
+      el.hereBtn.textContent = "Save the spot I'm at right now";
+      toast(geoErrorMessage(error));
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+  );
+});
+
+/** A position we can use for search bias — only if permission is already granted. */
+async function cachedPosition() {
+  if (state.lastKnown) return state.lastKnown;
+  try {
+    const status = await navigator.permissions?.query({ name: 'geolocation' });
+    if (status?.state !== 'granted') return null;
+  } catch {
+    return null; // Permissions API unavailable — don't prompt just to sort a list.
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({ lat: position.coords.latitude, lon: position.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 4000, maximumAge: 600000 },
+    );
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Tracking                                                            */
+/* ------------------------------------------------------------------ */
+
+el.startBtn.addEventListener('click', start);
+el.stopBtn.addEventListener('click', stop);
+el.testVoiceBtn.addEventListener('click', () => {
+  chime('moveNow');
+  speak('Get out of the H O V lane now.');
+});
+
+function start() {
+  if (!state.target) return;
+  if (!navigator.geolocation) {
+    toast('This browser has no GPS access.');
+    return;
+  }
+
+  // Both of these have to be unlocked inside the tap that starts tracking,
+  // or iOS stays silent for the rest of the drive.
+  primeAudio();
+  speak(`Tracking ${state.target.name}. I'll tell you when to move over.`);
+
+  state.tracker = new ApproachTracker(state.target);
+  state.director = new AlertDirector(state.settings);
+  state.lastFixAt = null;
+
+  el.live.dataset.stage = 'idle';
+  el.liveTarget.textContent = state.target.name;
+  el.banner.textContent = STAGE_LABELS.idle;
+  el.distance.textContent = '—';
+  el.eta.textContent = '—';
+  el.speed.textContent = '—';
+  el.live.hidden = false;
+  el.setup.hidden = true;
+
+  state.watchId = navigator.geolocation.watchPosition(onFix, onFixError, {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 20000,
+  });
+
+  state.staleTimer = setInterval(checkFixAge, 3000);
+  requestWakeLock();
+}
+
+function stop() {
+  if (state.watchId != null) navigator.geolocation.clearWatch(state.watchId);
+  state.watchId = null;
+  clearInterval(state.staleTimer);
+  state.staleTimer = null;
+  releaseWakeLock();
+  try { speechSynthesis.cancel(); } catch { /* not supported */ }
+  el.live.hidden = true;
+  el.setup.hidden = false;
+}
+
+function onFix(position) {
+  const c = position.coords;
+  state.lastKnown = { lat: c.latitude, lon: c.longitude };
+  state.lastFixAt = Date.now();
+
+  const snap = state.tracker.update({
+    lat: c.latitude,
+    lon: c.longitude,
+    t: position.timestamp || Date.now(),
+    speed: c.speed,
+    heading: c.heading,
+    accuracy: c.accuracy,
+  });
+  if (!snap) {
+    el.gpsPill.textContent = 'GPS: weak signal';
+    el.gpsPill.classList.add('warn');
+    return;
+  }
+
+  el.gpsPill.textContent = `GPS: ±${Math.round(snap.accuracy ?? 0)} m`;
+  el.gpsPill.classList.toggle('warn', (snap.accuracy ?? 0) > 60);
+
+  const { stage, announce } = state.director.consider(snap);
+  render(snap, stage);
+
+  if (announce) {
+    chime(stage);
+    speak(announcementFor(stage, snap, state.target, state.settings.units));
+  }
+}
+
+function render(snap, stage) {
+  el.live.dataset.stage = stage;
+  el.banner.textContent = STAGE_LABELS[stage] ?? '';
+  el.distance.textContent = formatDistance(snap.distance, state.settings.units);
+  el.eta.textContent = snap.etaSec != null ? formatDuration(snap.etaSec) : 'no ETA';
+  el.speed.textContent = formatSpeed(snap.groundSpeed, state.settings.units);
+}
+
+function onFixError(error) {
+  el.gpsPill.textContent = `GPS: ${geoErrorMessage(error)}`;
+  el.gpsPill.classList.add('warn');
+  if (error.code === error.PERMISSION_DENIED) {
+    toast('Location is blocked. Settings → Safari → Location → Allow.');
+    stop();
+  }
+}
+
+function checkFixAge() {
+  if (!state.lastFixAt) return;
+  const age = (Date.now() - state.lastFixAt) / 1000;
+  if (age > 12) {
+    el.gpsPill.textContent = `GPS: no fix for ${Math.round(age)}s`;
+    el.gpsPill.classList.add('warn');
+  }
+}
+
+function geoErrorMessage(error) {
+  if (!error) return 'unavailable';
+  if (error.code === error.PERMISSION_DENIED) return 'permission denied';
+  if (error.code === error.POSITION_UNAVAILABLE) return 'position unavailable';
+  if (error.code === error.TIMEOUT) return 'timed out';
+  return 'error';
+}
+
+/* ------------------------------------------------------------------ */
+/* Sound                                                               */
+/* ------------------------------------------------------------------ */
+
+function primeAudio() {
+  // Always unlock, even with the chime off — this tap is the only chance iOS
+  // gives us, and the setting can be switched on later.
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    state.audio ||= new Ctx();
+    if (state.audio.state === 'suspended') state.audio.resume();
+  } catch {
+    state.audio = null;
+  }
+}
+
+/** One beep for a heads-up, escalating to three sharp ones at the last call. */
+function chime(stage) {
+  if (!state.settings.chime || !state.audio) return;
+  const beeps = Math.min(3, Math.max(1, severity(stage) - severity('headsUp') + 1));
+  const pitch = stage === 'final' ? 1180 : stage === 'moveNow' ? 900 : 720;
+  for (let i = 0; i < beeps; i++) at(state.audio.currentTime + i * 0.22, pitch);
+
+  function at(time, frequency) {
+    const osc = state.audio.createOscillator();
+    const gain = state.audio.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(0.35, time + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.16);
+    osc.connect(gain).connect(state.audio.destination);
+    osc.start(time);
+    osc.stop(time + 0.2);
+  }
+}
+
+function speak(text) {
+  if (!state.settings.voice || !text) return;
+  try {
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.volume = 1.0;
+    speechSynthesis.speak(utterance);
+  } catch {
+    /* speech is a bonus; the screen still shows the warning */
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Wake lock                                                           */
+/* ------------------------------------------------------------------ */
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    el.wakePill.hidden = false;
+    el.wakePill.classList.add('warn');
+    el.wakePill.textContent = 'Set Auto-Lock to Never';
+    return;
+  }
+  try {
+    state.wakeLock = await navigator.wakeLock.request('screen');
+    el.wakePill.hidden = false;
+    el.wakePill.classList.remove('warn');
+    el.wakePill.textContent = 'Screen staying on';
+    state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
+  } catch {
+    el.wakePill.hidden = false;
+    el.wakePill.classList.add('warn');
+    el.wakePill.textContent = 'Set Auto-Lock to Never';
+  }
+}
+
+function releaseWakeLock() {
+  try { state.wakeLock?.release(); } catch { /* already gone */ }
+  state.wakeLock = null;
+  el.wakePill.hidden = true;
+}
+
+// Coming back from a phone call or a lock drops the wake lock — take it again.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.watchId != null && !state.wakeLock) {
+    requestWakeLock();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Settings                                                            */
+/* ------------------------------------------------------------------ */
+
+function unitDivisor() {
+  return state.settings.units === 'metric' ? 1000 : METERS_PER_MILE;
+}
+
+function renderSettings() {
+  const metric = state.settings.units === 'metric';
+  for (const field of SETTING_FIELDS) {
+    $(field.distInput).value = (state.settings[field.meters] / unitDivisor()).toFixed(2).replace(/\.?0+$/, '');
+    $(field.secInput).value = String(Math.round(state.settings[field.secs]));
+  }
+  for (const node of document.querySelectorAll('.u-dist')) node.textContent = metric ? 'km' : 'mi';
+  el.voiceToggle.checked = !!state.settings.voice;
+  el.chimeToggle.checked = !!state.settings.chime;
+  el.metricToggle.checked = metric;
+}
+
+function readSettings() {
+  for (const field of SETTING_FIELDS) {
+    const dist = Number($(field.distInput).value);
+    const secs = Number($(field.secInput).value);
+    if (Number.isFinite(dist) && dist > 0) state.settings[field.meters] = dist * unitDivisor();
+    if (Number.isFinite(secs) && secs > 0) state.settings[field.secs] = secs;
+  }
+  state.settings.voice = el.voiceToggle.checked;
+  state.settings.chime = el.chimeToggle.checked;
+  saveJSON(STORE.settings, state.settings);
+  state.director?.updateSettings(state.settings);
+  renderSelected();
+}
+
+for (const field of SETTING_FIELDS) {
+  $(field.distInput).addEventListener('change', readSettings);
+  $(field.secInput).addEventListener('change', readSettings);
+}
+el.voiceToggle.addEventListener('change', readSettings);
+el.chimeToggle.addEventListener('change', readSettings);
+el.metricToggle.addEventListener('change', () => {
+  state.settings.units = el.metricToggle.checked ? 'metric' : 'imperial';
+  saveJSON(STORE.settings, state.settings);
+  renderSettings();
+  renderSaved();
+  renderSelected();
+});
+
+/* ------------------------------------------------------------------ */
+/* Rendering                                                           */
+/* ------------------------------------------------------------------ */
+
+function renderSaved() {
+  el.saved.innerHTML = '';
+  el.savedCard.hidden = state.places.length === 0;
+  state.places.forEach((place, index) => {
+    const li = document.createElement('li');
+
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.className = 'pick';
+    pick.innerHTML = `<div class="saved-name"></div><div class="saved-meta"></div>`;
+    pick.querySelector('.saved-name').textContent = place.name;
+    pick.querySelector('.saved-meta').textContent =
+      place.meta || `${place.lat.toFixed(4)}, ${place.lon.toFixed(4)}`;
+    pick.addEventListener('click', () => selectTarget(place));
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.setAttribute('aria-label', `Delete ${place.name}`);
+    del.textContent = '×';
+    del.addEventListener('click', () => forgetPlace(index));
+
+    li.append(pick, del);
+    el.saved.append(li);
+  });
+}
+
+function renderSelected() {
+  el.selectedCard.hidden = !state.target;
+  if (!state.target) return;
+  el.selectedName.textContent = state.target.name;
+  const warnAt = formatDistance(state.settings.moveNowMeters, state.settings.units);
+  el.selectedMeta.textContent =
+    `${state.target.meta ? state.target.meta + ' — ' : ''}warns you ${warnAt} out`;
+}
+
+function toast(message, ms = 4200) {
+  el.toast.textContent = message;
+  el.toast.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { el.toast.hidden = true; }, ms);
+}
+
+/* ------------------------------------------------------------------ */
+/* Boot                                                               */
+/* ------------------------------------------------------------------ */
+
+renderSettings();
+renderSaved();
+renderSelected();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* offline cache is optional */ });
+  });
+}

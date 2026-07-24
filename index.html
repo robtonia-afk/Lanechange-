@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lane Change — HOV exit alerts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="description" content="Tells you when to get out of the HOV lane so you don't miss your exit.">
+<meta name="theme-color" content="#0b1220">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lane Change">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ LIVE VIEW: what you see while driving ============ -->
+<main id="live" class="live" data-stage="idle" hidden>
+  <div class="live-top">
+    <div class="live-target" id="liveTarget">—</div>
+    <button type="button" class="ghost small" id="stopBtn">Stop</button>
+  </div>
+
+  <div class="banner" id="banner">Waiting for GPS</div>
+
+  <div class="readout">
+    <div class="distance" id="distance">—</div>
+    <div class="sub">
+      <span id="eta">—</span>
+      <span class="dot">•</span>
+      <span id="speed">—</span>
+    </div>
+  </div>
+
+  <div class="live-foot">
+    <div class="pill" id="gpsPill">GPS: acquiring…</div>
+    <div class="pill" id="wakePill" hidden>Screen lock off</div>
+    <button type="button" class="ghost small" id="testVoiceBtn">Test voice</button>
+  </div>
+</main>
+
+<!-- ============ SETUP VIEW ============ -->
+<main id="setup" class="setup">
+  <header>
+    <h1>Lane Change</h1>
+    <p class="tagline">Get out of the HOV lane in time.</p>
+  </header>
+
+  <section class="card">
+    <h2>Where are you exiting?</h2>
+    <form id="searchForm" autocomplete="off">
+      <div class="row">
+        <input id="searchInput" type="search" inputmode="search"
+               placeholder="Exit name, address, or 34.05, -118.25"
+               aria-label="Search for your exit">
+        <button type="submit" id="searchBtn">Search</button>
+      </div>
+    </form>
+    <p class="hint" id="searchHint">
+      Searching works best with something like “I-405 exit 26” or the cross-street
+      at the bottom of the ramp.
+    </p>
+    <ul class="results" id="results" hidden></ul>
+    <button type="button" class="ghost wide" id="hereBtn">Save the spot I'm at right now</button>
+  </section>
+
+  <section class="card" id="savedCard" hidden>
+    <h2>Saved exits</h2>
+    <ul class="saved" id="saved"></ul>
+  </section>
+
+  <section class="card selected" id="selectedCard" hidden>
+    <h2>Your exit</h2>
+    <div class="selected-name" id="selectedName">—</div>
+    <div class="selected-meta" id="selectedMeta">—</div>
+    <button type="button" class="primary wide" id="startBtn">Start alerts</button>
+    <p class="hint">
+      Mount the phone and keep this screen up. It will speak the warnings out loud.
+    </p>
+  </section>
+
+  <section class="card">
+    <details id="settingsDetails">
+      <summary><h2>Warning distances</h2></summary>
+      <p class="hint">
+        Whichever comes first — the distance or the time — triggers the alert. Time
+        matters when traffic is fast; distance matters when it's crawling.
+      </p>
+
+      <div class="setting">
+        <label for="headsUpMiles">Heads up</label>
+        <div class="setting-inputs">
+          <input id="headsUpMiles" type="number" step="0.1" min="0.1" inputmode="decimal">
+          <span class="unit u-dist">mi</span>
+          <span class="or">or</span>
+          <input id="headsUpSec" type="number" step="10" min="5" inputmode="numeric">
+          <span class="unit">sec</span>
+        </div>
+      </div>
+
+      <div class="setting">
+        <label for="moveNowMiles">Move over now</label>
+        <div class="setting-inputs">
+          <input id="moveNowMiles" type="number" step="0.1" min="0.1" inputmode="decimal">
+          <span class="unit u-dist">mi</span>
+          <span class="or">or</span>
+          <input id="moveNowSec" type="number" step="10" min="5" inputmode="numeric">
+          <span class="unit">sec</span>
+        </div>
+      </div>
+
+      <div class="setting">
+        <label for="finalMiles">Last call</label>
+        <div class="setting-inputs">
+          <input id="finalMiles" type="number" step="0.1" min="0.05" inputmode="decimal">
+          <span class="unit u-dist">mi</span>
+          <span class="or">or</span>
+          <input id="finalSec" type="number" step="5" min="5" inputmode="numeric">
+          <span class="unit">sec</span>
+        </div>
+      </div>
+
+      <div class="setting toggles">
+        <label><input type="checkbox" id="voiceToggle"> Speak alerts</label>
+        <label><input type="checkbox" id="chimeToggle"> Chime</label>
+        <label><input type="checkbox" id="metricToggle"> Use kilometers</label>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <p>
+      Straight-line distance to the point you picked, so it runs a little short of
+      the real road distance — leave yourself margin. Watch the road and the signs;
+      this is a reminder, not a navigator.
+    </p>
+    <p class="attrib">Search by <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> / Nominatim.</p>
+  </footer>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
