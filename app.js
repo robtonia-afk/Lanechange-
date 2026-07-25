@@ -24,6 +24,9 @@ const STORE = {
   openings: 'lanechange.openings.v1',
 };
 
+/** Restrict geocoding to one country; exit numbers are not globally unique. */
+const SEARCH_COUNTRIES = 'us';
+
 /** Search hits farther out than this are almost certainly a same-named exit elsewhere. */
 const PLAUSIBLE_DRIVE_METERS = 200_000;
 
@@ -175,6 +178,9 @@ async function geocode(query) {
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('limit', '8');
   url.searchParams.set('addressdetails', '1');
+  // Exit numbers repeat all over the world. Without this, "exit 26" matches in
+  // whichever country Nominatim scores highest, which is rarely this one.
+  url.searchParams.set('countrycodes', SEARCH_COUNTRIES);
 
   // Bias toward where the phone already is, when we know it, so "exit 26"
   // finds the one on your commute rather than one three states away.
@@ -262,20 +268,35 @@ el.hereBtn.addEventListener('click', () => {
   );
 });
 
-/** A position we can use for search bias — only if permission is already granted. */
+/**
+ * A position to bias search towards.
+ *
+ * Safari does not support querying the geolocation permission -- the call
+ * throws rather than answering -- so an unanswerable query has to mean "ask",
+ * not "give up". Treating it as give-up disabled the bias entirely on the one
+ * platform this app is for, and searching "I-405 exit 26" returned exits in
+ * Iran. Only an explicit denial skips the prompt.
+ */
 async function cachedPosition() {
   if (state.lastKnown) return state.lastKnown;
+
+  let denied = false;
   try {
     const status = await navigator.permissions?.query({ name: 'geolocation' });
-    if (status?.state !== 'granted') return null;
+    denied = status?.state === 'denied';
   } catch {
-    return null; // Permissions API unavailable — don't prompt just to sort a list.
+    denied = false; // Unsupported query tells us nothing; fall through and ask.
   }
+  if (denied) return null;
+
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
-      (position) => resolve({ lat: position.coords.latitude, lon: position.coords.longitude }),
+      (position) => {
+        state.lastKnown = { lat: position.coords.latitude, lon: position.coords.longitude };
+        resolve(state.lastKnown);
+      },
       () => resolve(null),
-      { enableHighAccuracy: false, timeout: 4000, maximumAge: 600000 },
+      { enableHighAccuracy: false, timeout: 6000, maximumAge: 600000 },
     );
   });
 }
