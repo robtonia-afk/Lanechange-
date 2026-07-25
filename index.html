@@ -33,6 +33,7 @@
       <span class="dot">•</span>
       <span id="speed">—</span>
     </div>
+    <div class="context" id="context" hidden>—</div>
   </div>
 
   <div class="live-foot">
@@ -77,6 +78,28 @@
     <h2>Your exit</h2>
     <div class="selected-name" id="selectedName">—</div>
     <div class="selected-meta" id="selectedMeta">—</div>
+
+    <div class="gate">
+      <div class="gate-head">
+        <span class="gate-title">HOV lane opening</span>
+        <span class="gate-state" id="gateState">not set</span>
+      </div>
+      <p class="hint">
+        On a buffer-separated carpool lane you can only cross at marked openings,
+        often well before the ramp. Set one and the countdown runs to the opening
+        instead of the exit. Leave it blank where access is continuous.
+      </p>
+      <div class="row">
+        <input id="gateInput" type="text" inputmode="decimal"
+               placeholder="34.0632, -118.2887" aria-label="HOV opening coordinates">
+        <button type="button" class="ghost" id="gateSaveBtn">Set</button>
+      </div>
+      <div class="row gate-actions">
+        <button type="button" class="ghost small" id="gateHereBtn">Use where I am now</button>
+        <button type="button" class="ghost small" id="gateClearBtn" hidden>Remove</button>
+      </div>
+    </div>
+
     <button type="button" class="primary wide" id="startBtn">Start alerts</button>
     <button type="button" class="ghost wide" id="simulateBtn">Simulate the drive in</button>
     <p class="hint">

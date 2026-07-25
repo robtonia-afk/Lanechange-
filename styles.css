@@ -211,6 +211,35 @@ summary h2 { display: inline; }
 .sub { color: var(--muted); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .sub .dot { margin: 0 8px; opacity: 0.5; }
 
+/* Secondary target — the ramp, while the countdown is running to the opening. */
+.context {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-align: center;
+  opacity: 0.85;
+}
+
+/* --- gate setup --- */
+
+.gate {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.gate-head { display: flex; align-items: baseline; gap: 8px; }
+.gate-title { font-weight: 600; }
+.gate-state {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.gate-state.set { color: #2ecf7a; }
+.gate .row { margin-top: 10px; }
+.gate-actions { flex-wrap: wrap; }
+.gate-actions button { flex: 1 1 auto; }
+
 .live-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pill {
   background: var(--card);

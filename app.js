@@ -3,12 +3,14 @@ import {
   DEFAULT_SETTINGS,
   ApproachTracker,
   AlertDirector,
-  STAGE_LABELS,
+  labelsFor,
   announcementFor,
+  speakDistance,
   formatDistance,
   formatDuration,
   formatSpeed,
   destinationPoint,
+  bearing,
   haversine,
   parseCoordinates,
   severity,
@@ -49,6 +51,12 @@ const el = {
   wakePill: $('wakePill'),
   simulateBtn: $('simulateBtn'),
   simPill: $('simPill'),
+  context: $('context'),
+  gateState: $('gateState'),
+  gateInput: $('gateInput'),
+  gateSaveBtn: $('gateSaveBtn'),
+  gateHereBtn: $('gateHereBtn'),
+  gateClearBtn: $('gateClearBtn'),
   testVoiceBtn: $('testVoiceBtn'),
   toast: $('toast'),
   settingsDetails: $('settingsDetails'),
@@ -71,6 +79,7 @@ const state = {
   director: null,
   watchId: null,
   simTimer: null,
+  phase: 'exit',
   wakeLock: null,
   lastFixAt: null,
   staleTimer: null,
@@ -286,13 +295,17 @@ function beginSession(opening) {
   primeAudio();
   speak(opening);
 
-  state.tracker = new ApproachTracker(state.target);
+  // With an opening set, the first leg counts down to it rather than to the
+  // ramp — crossing the buffer is the deadline you can actually miss.
+  state.phase = state.target.gate ? 'gate' : 'exit';
+  state.tracker = new ApproachTracker(aimPoint());
   state.director = new AlertDirector(state.settings);
   state.lastFixAt = null;
 
   el.live.dataset.stage = 'idle';
   el.liveTarget.textContent = state.target.name;
-  el.banner.textContent = STAGE_LABELS.idle;
+  el.banner.textContent = labelsFor(state.phase).idle;
+  el.context.hidden = true;
   el.distance.textContent = '—';
   el.eta.textContent = '—';
   el.speed.textContent = '—';
@@ -332,25 +345,39 @@ function startSimulation() {
   el.gpsPill.textContent = 'GPS: simulated';
 
   const SPEED = 30; // m/s, about 67 mph
-  const start = Math.max(state.settings.headsUpMeters * 1.4, 1200);
-  let remaining = start;
+  const lead = Math.max(state.settings.headsUpMeters * 1.4, 1200);
+  const exit = state.target;
+  const gate = state.target.gate;
+
+  // Lay a straight track along the real gate-to-exit direction so the whole
+  // trip plays out: run up to the opening, through it, then on to the ramp.
+  // With no opening set it is just a straight run in from the south.
+  const course = gate ? bearing(gate, exit) : 0;
+  const origin = destinationPoint(gate ?? exit, (course + 180) % 360, lead);
+  const total = lead + (gate ? haversine(gate, exit) : 0) + 450;
+
+  let travelled = 0;
   let clock = Date.now();
 
   state.simTimer = setInterval(() => {
-    if (remaining < -450) {
+    if (travelled > total) {
       stop();
       toast('Simulation finished.');
       return;
     }
-    // Approach from the south so the synthetic track is a straight run in.
-    const here = destinationPoint(state.target, 180, Math.abs(remaining));
-    const point = remaining >= 0 ? here : destinationPoint(state.target, 0, -remaining);
+    const point = destinationPoint(origin, course, travelled);
     clock += 1000;
     onFix({
-      coords: { latitude: point.lat, longitude: point.lon, speed: SPEED, accuracy: 6, heading: 0 },
+      coords: {
+        latitude: point.lat,
+        longitude: point.lon,
+        speed: SPEED,
+        accuracy: 6,
+        heading: course,
+      },
       timestamp: clock,
     });
-    remaining -= SPEED;
+    travelled += SPEED;
   }, 200);
 }
 
@@ -391,20 +418,55 @@ function onFix(position) {
   el.gpsPill.classList.toggle('warn', (snap.accuracy ?? 0) > 60);
 
   const { stage, announce } = state.director.consider(snap);
-  render(snap, stage);
+  render(snap, stage, { lat: c.latitude, lon: c.longitude });
 
   if (announce) {
     chime(stage);
-    speak(announcementFor(stage, snap, state.target, state.settings.units));
+    speak(announcementFor(stage, snap, state.target, state.settings.units, state.phase));
+  }
+
+  // Through the opening: the rest of the trip is an ordinary run at the ramp,
+  // so re-aim at the exit and start its staging fresh.
+  if (state.phase === 'gate' && (stage === 'atExit' || stage === 'passed')) {
+    handOffToExit({ lat: c.latitude, lon: c.longitude });
   }
 }
 
-function render(snap, stage) {
+/** The point the countdown is currently aimed at. */
+function aimPoint() {
+  return state.phase === 'gate' && state.target.gate
+    ? { ...state.target.gate, name: 'the opening' }
+    : state.target;
+}
+
+function handOffToExit(here) {
+  state.phase = 'ramp';
+  state.tracker = new ApproachTracker(state.target);
+  state.director = new AlertDirector(state.settings);
+  const left = haversine(here, state.target);
+  speak(
+    `You're out of the H O V lane. ${state.target.name} in ` +
+      `${speakDistance(left, state.settings.units)}.`,
+  );
+}
+
+function render(snap, stage, here) {
   el.live.dataset.stage = stage;
-  el.banner.textContent = STAGE_LABELS[stage] ?? '';
+  el.banner.textContent = labelsFor(state.phase)[stage] ?? '';
   el.distance.textContent = formatDistance(snap.distance, state.settings.units);
   el.eta.textContent = snap.etaSec != null ? formatDuration(snap.etaSec) : 'no ETA';
   el.speed.textContent = formatSpeed(snap.groundSpeed, state.settings.units);
+
+  // While aiming at the opening, keep the ramp visible so the numbers on
+  // screen never look like they contradict the road signs.
+  if (state.phase === 'gate' && here) {
+    const toExit = haversine(here, state.target);
+    el.context.textContent =
+      `${state.target.name} — ${formatDistance(toExit, state.settings.units)} past the opening`;
+    el.context.hidden = false;
+  } else {
+    el.context.hidden = true;
+  }
 }
 
 function onFixError(error) {
@@ -605,10 +667,70 @@ function renderSelected() {
   el.selectedCard.hidden = !state.target;
   if (!state.target) return;
   el.selectedName.textContent = state.target.name;
+
   const warnAt = formatDistance(state.settings.moveNowMeters, state.settings.units);
+  const aimedAt = state.target.gate ? 'the opening' : 'the exit';
   el.selectedMeta.textContent =
-    `${state.target.meta ? state.target.meta + ' — ' : ''}warns you ${warnAt} out`;
+    `${state.target.meta ? state.target.meta + ' — ' : ''}warns you ${warnAt} before ${aimedAt}`;
+
+  const gate = state.target.gate;
+  el.gateState.textContent = gate
+    ? `${gate.lat.toFixed(5)}, ${gate.lon.toFixed(5)}`
+    : 'not set';
+  el.gateState.classList.toggle('set', !!gate);
+  el.gateClearBtn.hidden = !gate;
+  el.gateInput.value = '';
 }
+
+/** Store an HOV opening against the selected exit. */
+function setGate(coords) {
+  state.target = { ...state.target, gate: coords };
+  saveJSON(STORE.target, state.target);
+  state.places = state.places.map((p) => (sameSpot(p, state.target) ? state.target : p));
+  saveJSON(STORE.places, state.places);
+  renderSaved();
+  renderSelected();
+}
+
+el.gateSaveBtn.addEventListener('click', () => {
+  const coords = parseCoordinates(el.gateInput.value);
+  if (!coords) {
+    toast('Enter the opening as coordinates, like 34.0632, -118.2887.');
+    return;
+  }
+  setGate(coords);
+  toast('Opening set. The countdown now runs to it.');
+});
+
+el.gateHereBtn.addEventListener('click', () => {
+  el.gateHereBtn.disabled = true;
+  el.gateHereBtn.textContent = 'Getting a fix…';
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      el.gateHereBtn.disabled = false;
+      el.gateHereBtn.textContent = 'Use where I am now';
+      setGate({ lat: position.coords.latitude, lon: position.coords.longitude });
+      toast('Opening set from your current spot.');
+    },
+    (error) => {
+      el.gateHereBtn.disabled = false;
+      el.gateHereBtn.textContent = 'Use where I am now';
+      toast(geoErrorMessage(error));
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+  );
+});
+
+el.gateClearBtn.addEventListener('click', () => {
+  const { gate, ...withoutGate } = state.target;
+  state.target = withoutGate;
+  saveJSON(STORE.target, state.target);
+  state.places = state.places.map((p) => (sameSpot(p, state.target) ? state.target : p));
+  saveJSON(STORE.places, state.places);
+  renderSaved();
+  renderSelected();
+  toast('Opening removed. Counting down to the exit again.');
+});
 
 function toast(message, ms = 4200) {
   el.toast.textContent = message;

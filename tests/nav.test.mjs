@@ -16,6 +16,9 @@ import {
   formatSpeed,
   parseCoordinates,
   speakDistance,
+  announcementFor,
+  labelsFor,
+  STAGE_LABELS,
 } from '../nav.js';
 
 /** Move a point north by `meters`, so distances in tests are exact-ish. */
@@ -219,6 +222,44 @@ test('director reports passing the exit', () => {
   const r = director.consider({ distance: 400, etaSec: null, passed: true });
   assert.equal(r.stage, 'passed');
   assert.equal(r.announce, true);
+});
+
+test('gate phase talks about crossing, exit phase about the ramp', () => {
+  const snap = { distance: 0.4 * METERS_PER_MILE };
+  const exit = { name: 'Exit 26' };
+
+  const gate = announcementFor('moveNow', snap, exit, 'imperial', 'gate');
+  assert.match(gate, /cross out of the h o v lane now/i);
+  assert.match(gate, /0\.4 miles/);
+  assert.doesNotMatch(gate, /take the exit/i);
+
+  const ramp = announcementFor('moveNow', snap, exit, 'imperial', 'exit');
+  assert.match(ramp, /get out of the h o v lane now/i);
+  assert.match(ramp, /Exit 26/);
+
+  // "Take the exit" must never be said while the ramp is still miles away.
+  assert.doesNotMatch(announcementFor('final', snap, exit, 'imperial', 'gate'), /take the exit/i);
+  assert.match(announcementFor('final', snap, exit, 'imperial', 'exit'), /take the exit/i);
+});
+
+test('after crossing at the opening it stops saying to leave the lane', () => {
+  const snap = { distance: 0.4 * METERS_PER_MILE };
+  const exit = { name: 'Exit 26' };
+  for (const stage of ['headsUp', 'moveNow', 'final', 'atExit']) {
+    const said = announcementFor(stage, snap, exit, 'imperial', 'ramp');
+    assert.doesNotMatch(said, /h o v lane/i, `"${said}" still talks about the HOV lane`);
+    assert.doesNotMatch(said, /cross/i);
+  }
+  assert.match(announcementFor('moveNow', snap, exit, 'imperial', 'ramp'), /move right/i);
+  assert.equal(labelsFor('ramp').moveNow, 'Move right for the exit');
+});
+
+test('labelsFor switches the on-screen wording by phase', () => {
+  assert.equal(labelsFor('gate').moveNow, 'Cross out of the HOV lane');
+  assert.equal(labelsFor('exit').moveNow, 'Get out of the HOV lane');
+  assert.equal(labelsFor('exit').final, 'Exit now');
+  assert.equal(labelsFor('gate').final, 'Cross now');
+  assert.equal(labelsFor(undefined).moveNow, STAGE_LABELS.moveNow, 'defaults to exit wording');
 });
 
 test('formatting is readable in both unit systems', () => {

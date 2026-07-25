@@ -358,10 +358,82 @@ export const STAGE_LABELS = {
   passed: 'Exit passed',
 };
 
-/** What the app says out loud when a stage is first reached. */
-export function announcementFor(stage, snap, target, units = 'imperial') {
+/**
+ * Labels for the first leg of a two-point trip, where the deadline is the
+ * opening in the buffer rather than the ramp itself.
+ */
+export const GATE_STAGE_LABELS = {
+  idle: 'Waiting for GPS',
+  far: 'On the way',
+  headsUp: 'Opening ahead',
+  moveNow: 'Cross out of the HOV lane',
+  final: 'Cross now',
+  atExit: 'At the opening',
+  passed: 'Opening passed',
+};
+
+/**
+ * Third leg wording: you are already out of the carpool lane, having crossed at
+ * the opening, and all that is left is the ramp itself.
+ */
+export const RAMP_STAGE_LABELS = {
+  idle: 'Waiting for GPS',
+  far: 'On the way',
+  headsUp: 'Exit ahead',
+  moveNow: 'Move right for the exit',
+  final: 'Exit now',
+  atExit: 'At your exit',
+  passed: 'Exit passed',
+};
+
+export function labelsFor(phase) {
+  if (phase === 'gate') return GATE_STAGE_LABELS;
+  if (phase === 'ramp') return RAMP_STAGE_LABELS;
+  return STAGE_LABELS;
+}
+
+/**
+ * What the app says out loud when a stage is first reached.
+ * In the 'gate' phase the deadline is the buffer opening, so the wording is
+ * about crossing the stripe, not about taking the ramp.
+ */
+export function announcementFor(stage, snap, target, units = 'imperial', phase = 'exit') {
   const name = target?.name ? target.name : 'your exit';
   const dist = speakDistance(snap?.distance, units);
+
+  if (phase === 'gate') {
+    switch (stage) {
+      case 'headsUp':
+        return `Heads up. Your carpool lane opening for ${name} is in ${dist}.`;
+      case 'moveNow':
+        return `Cross out of the H O V lane now. The opening is in ${dist}.`;
+      case 'final':
+        return `Cross now. The opening is right here.`;
+      case 'passed':
+        return `You passed the opening for ${name}.`;
+      default:
+        return '';
+    }
+  }
+
+  if (phase === 'ramp') {
+    // Already out of the carpool lane — do not tell them to leave it again.
+    switch (stage) {
+      case 'headsUp':
+        return `${name} in ${dist}.`;
+      case 'moveNow':
+        return `Move right for ${name}. ${dist} to go.`;
+      case 'final':
+        return `Take the exit. ${name} is right ahead.`;
+      case 'atExit':
+        return `You are at ${name}.`;
+      case 'passed':
+        return `You passed ${name}.`;
+      default:
+        return '';
+    }
+  }
+
   switch (stage) {
     case 'headsUp':
       return `Heads up. ${name} in ${dist}. Start working your way out of the H O V lane.`;

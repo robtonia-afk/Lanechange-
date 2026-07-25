@@ -50,6 +50,31 @@ HTTPS is required — GPS is disabled on plain `http://` — which Pages gives y
 for free. It must be Safari for the install step; Chrome on iOS can't add to the
 home screen.
 
+## Buffer-separated carpool lanes (most of Southern California)
+
+Where the HOV lane is separated by a painted buffer, you may only cross at
+marked openings — and the opening is often a mile or more before your ramp.
+Counting down to the exit warns you about the wrong landmark: by the time it
+speaks, your opening can already be behind you.
+
+So an exit can carry an optional **HOV lane opening**. Set one and the trip
+runs in two legs:
+
+1. **To the opening** — "Cross out of the H O V lane now. The opening is in
+   0.2 miles." The ramp stays on screen underneath as context, so the numbers
+   never look like they contradict the signs.
+2. **To the ramp** — once you're through, it re-aims at the exit and says so:
+   "You're out of the H O V lane. Exit 26 in 0.8 miles." From here it never
+   mentions the carpool lane again, because you've already left it.
+
+Leave the opening blank on continuous-access lanes — most of Northern
+California, where you can cross whenever — and it behaves exactly as before.
+
+Set it by pasting coordinates, or tap **Use where I am now** as you pass the
+opening. To find the coordinates without driving: the openings are plainly
+visible from above, so find the break in the buffer striping in any satellite
+view, drop a pin, and paste the numbers in.
+
 ## Trying it without driving
 
 Pick an exit, then tap **Simulate the drive in**. It replays a scripted 67 mph
