@@ -30,6 +30,7 @@ def bundled_script():
     """nav.js + openings.js + app.js as one inline module."""
     nav = read("nav.js")
     openings = read("openings.js")
+    mapjs = read("map.js")
     app = read("app.js")
 
     # Inlining removes the module boundary, so the export/import pair goes too.
@@ -40,8 +41,10 @@ def bundled_script():
         r"^import \{[\s\S]*?\} from '\./" + mod + r"\.js';\n", "", src, count=1, flags=re.MULTILINE
     )
     openings = strip(openings, "nav")
+    mapjs = re.sub(r"^export (?=const|function|class)", "", mapjs, flags=re.MULTILINE)
     app = strip(app, "nav")
     app = strip(app, "openings")
+    app = strip(app, "map")
 
     # There is no sw.js beside a single-file build, and registering it would
     # just 404 in the console.
@@ -51,6 +54,10 @@ def bundled_script():
     if not swept:
         raise SystemExit("service worker registration not found — check the pattern")
 
+    if "from './map.js'" in app:
+        raise SystemExit("app.js still imports map.js after stripping")
+    if re.search(r"^export ", mapjs, flags=re.MULTILINE):
+        raise SystemExit("map.js still has exports after stripping")
     if "from './openings.js'" in app:
         raise SystemExit("app.js still imports openings.js after stripping")
     if "from './nav.js'" in openings:
@@ -65,6 +72,7 @@ def bundled_script():
     return (
         f"/* --- nav.js --- */\n{nav}\n"
         f"/* --- openings.js --- */\n{openings}\n"
+        f"/* --- map.js --- */\n{mapjs}\n"
         f"/* --- app.js --- */\n{app}"
     )
 

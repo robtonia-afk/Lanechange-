@@ -58,7 +58,7 @@ a { color: var(--accent); }
 
 .row { display: flex; gap: 8px; }
 
-input[type="search"], input[type="number"] {
+input[type="search"], input[type="number"], input[type="text"] {
   flex: 1 1 auto;
   min-width: 0;
   background: var(--card-2);
@@ -281,3 +281,82 @@ summary h2 { display: inline; }
 }
 .boot-error p { margin: 6px 0 12px; font-size: 14px; color: #f0bcbc; }
 .boot-error button { background: #ffdede; color: #2a0f0f; }
+
+/* ---------------- map picker ---------------- */
+
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(var(--safe-top) + 10px) var(--pad) 10px;
+  border-bottom: 1px solid var(--line);
+}
+.picker-title { flex: 1 1 auto; text-align: center; font-weight: 600; }
+#pickUseBtn { background: #2ecf7a; color: #04170d; }
+
+.picker-map {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: #0f1626;
+  touch-action: none;      /* we handle pan and pinch ourselves */
+  cursor: grab;
+}
+.map-surface { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.map-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 256px;
+  height: 256px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Sits dead centre; the point you pick is whatever is under it. */
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  pointer-events: none;
+  z-index: 2;
+}
+.crosshair::before,
+.crosshair::after {
+  content: "";
+  position: absolute;
+  background: #ff3b30;
+  box-shadow: 0 0 0 1px #fff8;
+}
+.crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+.crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+
+.picker-foot {
+  padding: 10px var(--pad) calc(var(--safe-bottom) + 12px);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.picker-coords {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.picker-controls { display: flex; gap: 8px; margin-left: auto; }
+#pickInBtn, #pickOutBtn { min-width: 44px; font-size: 18px; }
+.picker-attrib { flex: 1 1 100%; color: var(--muted); font-size: 11px; }

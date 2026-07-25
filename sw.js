@@ -2,7 +2,7 @@
  * Offline shell. Bump CACHE when any shell file changes, otherwise the phone
  * keeps serving the old copy.
  */
-const CACHE = 'lanechange-v3';
+const CACHE = 'lanechange-v4';
 
 const SHELL = [
   './',
@@ -11,6 +11,7 @@ const SHELL = [
   './app.js',
   './nav.js',
   './openings.js',
+  './map.js',
   './manifest.webmanifest',
   './icons/icon-180.png',
   './icons/icon-192.png',

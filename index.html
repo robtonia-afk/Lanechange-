@@ -95,6 +95,7 @@
       at the bottom of the ramp.
     </p>
     <ul class="results" id="results" hidden></ul>
+    <button type="button" class="ghost wide" id="pickExitBtn">Pick the exit on a map</button>
     <button type="button" class="ghost wide" id="hereBtn">Save the spot I'm at right now</button>
   </section>
 
@@ -124,6 +125,7 @@
         <button type="button" class="ghost" id="gateSaveBtn">Set</button>
       </div>
       <div class="row gate-actions">
+        <button type="button" class="ghost small" id="gatePickBtn">Pick on map</button>
         <button type="button" class="ghost small" id="gateHereBtn">Use where I am now</button>
         <button type="button" class="ghost small" id="gateFindBtn">Look up in OpenStreetMap</button>
         <button type="button" class="ghost small" id="gateClearBtn" hidden>Remove</button>
@@ -198,6 +200,32 @@
     <p class="attrib">Build <span id="buildStamp">—</span> • Search by <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> / Nominatim.</p>
   </footer>
 </main>
+
+<!-- ============ MAP PICKER ============ -->
+<div class="picker" id="picker" hidden>
+  <div class="picker-bar">
+    <button type="button" class="ghost small" id="pickCancelBtn">Cancel</button>
+    <div class="picker-title" id="pickTitle">Pick a point</div>
+    <button type="button" class="small" id="pickUseBtn">Use this</button>
+  </div>
+
+  <div class="picker-map" id="pickerMap">
+    <!-- Fixed to the centre: you move the map under it, which beats trying to
+         hit a small target with a thumb. -->
+    <div class="crosshair" aria-hidden="true"></div>
+  </div>
+
+  <div class="picker-foot">
+    <div class="picker-coords" id="pickCoords">—</div>
+    <div class="picker-controls">
+      <button type="button" class="ghost small" id="pickLayerBtn">Street</button>
+      <button type="button" class="ghost small" id="pickLocateBtn">Recenter</button>
+      <button type="button" class="ghost small" id="pickOutBtn" aria-label="Zoom out">−</button>
+      <button type="button" class="ghost small" id="pickInBtn" aria-label="Zoom in">+</button>
+    </div>
+    <div class="picker-attrib" id="pickAttrib"></div>
+  </div>
+</div>
 
 <div class="toast" id="toast" hidden></div>
 

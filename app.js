@@ -16,12 +16,14 @@ import {
   severity,
 } from './nav.js';
 import { overpassQuery, findOpenings } from './openings.js';
+import { TileMap, LAYERS } from './map.js';
 
 const STORE = {
   settings: 'lanechange.settings.v1',
   places: 'lanechange.places.v1',
   target: 'lanechange.target.v1',
   openings: 'lanechange.openings.v1',
+  mapLayer: 'lanechange.maplayer.v1',
 };
 
 /** Restrict geocoding to one country; exit numbers are not globally unique. */
@@ -64,6 +66,19 @@ const el = {
   gateClearBtn: $('gateClearBtn'),
   gateFindBtn: $('gateFindBtn'),
   gateResults: $('gateResults'),
+  gatePickBtn: $('gatePickBtn'),
+  pickExitBtn: $('pickExitBtn'),
+  picker: $('picker'),
+  pickerMap: $('pickerMap'),
+  pickTitle: $('pickTitle'),
+  pickCoords: $('pickCoords'),
+  pickAttrib: $('pickAttrib'),
+  pickCancelBtn: $('pickCancelBtn'),
+  pickUseBtn: $('pickUseBtn'),
+  pickLayerBtn: $('pickLayerBtn'),
+  pickLocateBtn: $('pickLocateBtn'),
+  pickInBtn: $('pickInBtn'),
+  pickOutBtn: $('pickOutBtn'),
   testVoiceBtn: $('testVoiceBtn'),
   toast: $('toast'),
   settingsDetails: $('settingsDetails'),
@@ -92,6 +107,7 @@ const state = {
   staleTimer: null,
   audio: null,
   lastKnown: null,
+  mapLayer: loadJSON(STORE.mapLayer, 'satellite'),
 };
 state.settings = { ...DEFAULT_SETTINGS, ...state.settings };
 
@@ -246,6 +262,105 @@ function renderResults(places) {
   }
   el.results.hidden = false;
 }
+
+/* ------------------------------------------------------------------ */
+/* Map picker                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Open the map on a point and hand back whatever the crosshair ends on.
+ * Starts on satellite: the ramps and the break in the buffer striping are both
+ * things you identify by looking at the road, not at a label.
+ */
+async function pickOnMap({ title, start, onPick }) {
+  el.pickTitle.textContent = title;
+  el.picker.hidden = false;
+
+  const center = start ?? state.lastKnown ?? (await cachedPosition()) ?? { lat: 34.05, lon: -118.24 };
+
+  const map = new TileMap(el.pickerMap, {
+    center,
+    zoom: 17,
+    layer: state.mapLayer,
+    onChange: (at) => {
+      el.pickCoords.textContent = `${at.lat.toFixed(5)}, ${at.lon.toFixed(5)}`;
+    },
+  });
+  // The container had no size until the panel was shown.
+  requestAnimationFrame(() => map.render());
+
+  const showLayer = () => {
+    el.pickLayerBtn.textContent = map.layer === 'satellite' ? 'Street' : 'Satellite';
+    el.pickAttrib.textContent = LAYERS[map.layer].attribution;
+  };
+  showLayer();
+
+  const close = () => {
+    map.destroy();
+    el.picker.hidden = true;
+    for (const [node, handler] of handlers) node.removeEventListener('click', handler);
+  };
+
+  const handlers = [
+    [el.pickCancelBtn, close],
+    [el.pickInBtn, () => map.zoomBy(1)],
+    [el.pickOutBtn, () => map.zoomBy(-1)],
+    [el.pickLayerBtn, () => {
+      state.mapLayer = map.layer === 'satellite' ? 'street' : 'satellite';
+      saveJSON(STORE.mapLayer, state.mapLayer);
+      map.setLayer(state.mapLayer);
+      showLayer();
+    }],
+    [el.pickLocateBtn, () => {
+      el.pickLocateBtn.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          el.pickLocateBtn.disabled = false;
+          state.lastKnown = { lat: position.coords.latitude, lon: position.coords.longitude };
+          map.setCenter(state.lastKnown, Math.max(map.zoom, 17));
+        },
+        (error) => {
+          el.pickLocateBtn.disabled = false;
+          toast(geoErrorMessage(error));
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
+      );
+    }],
+    [el.pickUseBtn, () => {
+      const at = map.center;
+      close();
+      onPick({ lat: at.lat, lon: at.lon });
+    }],
+  ];
+  for (const [node, handler] of handlers) node.addEventListener('click', handler);
+}
+
+el.pickExitBtn.addEventListener('click', () => {
+  pickOnMap({
+    title: 'Centre on your exit',
+    start: state.target ?? null,
+    onPick: (at) => {
+      selectTarget({
+        ...at,
+        name: `${at.lat.toFixed(5)}, ${at.lon.toFixed(5)}`,
+        meta: 'Picked on the map',
+      });
+      toast('Exit set from the map.');
+    },
+  });
+});
+
+el.gatePickBtn.addEventListener('click', () => {
+  if (!state.target) return;
+  pickOnMap({
+    title: 'Centre on the opening',
+    start: state.target.gate ?? state.target,
+    onPick: (at) => {
+      setGate(at);
+      toast('Opening set from the map.');
+    },
+  });
+});
 
 el.hereBtn.addEventListener('click', () => {
   el.hereBtn.disabled = true;

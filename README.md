@@ -9,7 +9,8 @@ a normal app.
 
 ## What it does
 
-1. You search for your exit and pick it from the results.
+1. You set your exit — search for it, pick it on a satellite map, or paste
+   coordinates.
 2. You tap **Start alerts** and mount the phone.
 3. As you close in, it escalates:
 
@@ -70,7 +71,11 @@ runs in two legs:
 Leave the opening blank on continuous-access lanes — most of Northern
 California, where you can cross whenever — and it behaves exactly as before.
 
-Three ways to set it:
+Four ways to set it:
+
+- **Pick on map** — opens a satellite map centred on where you are. Move the
+  map under the crosshair and tap **Use this**. The break in the buffer
+  striping is visible from above, so this is usually the fastest accurate way.
 
 - **Look up in OpenStreetMap** — queries Overpass for mapped openings near the
   exit and offers what it finds, nearest first.
