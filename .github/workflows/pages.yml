@@ -38,12 +38,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Assemble the site
-        # Ship only what the app needs — no tests, tools, or git history.
+        # Copy by exclusion, not by naming each file. The allowlist this
+        # replaces silently omitted a new module, which 404s at import time and
+        # leaves every control on the page dead.
+        # `*` skips dotfiles, so .git and .github stay out without naming them.
         run: |
           mkdir -p _site
-          cp index.html app.js nav.js styles.css sw.js manifest.webmanifest _site/
-          cp -r icons _site/
+          for item in *; do
+            case "$item" in
+              _site|tests|tools|dist|node_modules|package.json|package-lock.json|README.md)
+                continue ;;
+            esac
+            cp -r "$item" _site/
+          done
           ls -R _site
+
+      - name: Check the site is complete
+        run: node tools/check_site.mjs _site
 
       - uses: actions/configure-pages@v5
 
