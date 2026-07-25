@@ -5,7 +5,7 @@
   "description": "GPS alerts telling you when to get out of the HOV lane before your exit.",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/nav.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "serve": "npx http-server -p 8099 .",
     "icons": "python3 tools/make_icons.py",
     "build": "python3 tools/build_single.py"

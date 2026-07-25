@@ -70,10 +70,42 @@ runs in two legs:
 Leave the opening blank on continuous-access lanes — most of Northern
 California, where you can cross whenever — and it behaves exactly as before.
 
-Set it by pasting coordinates, or tap **Use where I am now** as you pass the
-opening. To find the coordinates without driving: the openings are plainly
-visible from above, so find the break in the buffer striping in any satellite
-view, drop a pin, and paste the numbers in.
+Three ways to set it:
+
+- **Look up in OpenStreetMap** — queries Overpass for mapped openings near the
+  exit and offers what it finds, nearest first.
+- **Use where I am now** — tap it as you pass the opening.
+- **Paste coordinates** — the openings are plainly visible from above, so find
+  the break in the buffer striping in any satellite view, drop a pin, and paste
+  the numbers in.
+
+### How the OpenStreetMap lookup works
+
+It rests on one property of OSM: mappers split a way wherever the lane markings
+change. So a segment whose carpool lane is tagged crossable *is* an opening in
+the buffer, and its first node in the direction of travel is the point where
+you may start moving right. No inference — it reads the geometry.
+
+`change:lanes` lists one value per lane, left to right. The carpool lane is
+taken from `hov:lanes` when mapped and assumed leftmost otherwise, which is how
+California builds them. `not_left` counts as crossable — it forbids only a move
+to the left, and you are going right — while `not_right` is the value that
+actually pins you in.
+
+Divided highways carry each direction as its own way, metres apart, so position
+cannot tell them apart. Direction can: a way whose heading points towards the
+exit is your carriageway, and the other is dropped.
+
+Two caveats, both real:
+
+- **Coverage is patchy.** `change:lanes` is a niche tag. "No mapped openings on
+  this stretch" is a normal answer, not a failure, and it leaves you with the
+  other two methods.
+- **OSM reflects when someone last mapped the road, not when Caltrans last
+  restriped it.** Results are candidates the app never applies on its own.
+  Confirm against the markings you can actually see.
+
+Each lookup is cached per exit, so it is one Overpass request ever.
 
 ## Trying it without driving
 

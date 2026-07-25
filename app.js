@@ -15,11 +15,13 @@ import {
   parseCoordinates,
   severity,
 } from './nav.js';
+import { overpassQuery, findOpenings } from './openings.js';
 
 const STORE = {
   settings: 'lanechange.settings.v1',
   places: 'lanechange.places.v1',
   target: 'lanechange.target.v1',
+  openings: 'lanechange.openings.v1',
 };
 
 /** Search hits farther out than this are almost certainly a same-named exit elsewhere. */
@@ -57,6 +59,8 @@ const el = {
   gateSaveBtn: $('gateSaveBtn'),
   gateHereBtn: $('gateHereBtn'),
   gateClearBtn: $('gateClearBtn'),
+  gateFindBtn: $('gateFindBtn'),
+  gateResults: $('gateResults'),
   testVoiceBtn: $('testVoiceBtn'),
   toast: $('toast'),
   settingsDetails: $('settingsDetails'),
@@ -720,6 +724,78 @@ el.gateHereBtn.addEventListener('click', () => {
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
   );
 });
+
+/**
+ * Ask OpenStreetMap where the buffer opens near this exit.
+ *
+ * Results are candidates, never applied automatically: OSM reflects when
+ * someone last mapped the road, not when Caltrans last restriped it, so the
+ * markings you can see always win.
+ */
+el.gateFindBtn.addEventListener('click', async () => {
+  if (!state.target) return;
+  const cacheKey = `${STORE.openings}.${state.target.lat.toFixed(4)},${state.target.lon.toFixed(4)}`;
+
+  el.gateFindBtn.disabled = true;
+  el.gateFindBtn.textContent = 'Looking…';
+  try {
+    let elements = loadJSON(cacheKey, null);
+    if (!elements) {
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: overpassQuery(state.target),
+      });
+      if (!response.ok) throw new Error(`Overpass ${response.status}`);
+      elements = (await response.json()).elements ?? [];
+      saveJSON(cacheKey, elements);
+    }
+    renderOpenings(findOpenings(elements, state.target));
+  } catch (error) {
+    console.error(error);
+    toast(
+      navigator.onLine
+        ? 'OpenStreetMap lookup failed. Try again, or set the opening by hand.'
+        : 'That lookup needs a connection.',
+    );
+  } finally {
+    el.gateFindBtn.disabled = false;
+    el.gateFindBtn.textContent = 'Look up in OpenStreetMap';
+  }
+});
+
+function renderOpenings(openings) {
+  el.gateResults.innerHTML = '';
+  if (!openings.length) {
+    el.gateResults.hidden = true;
+    toast('No mapped openings on this stretch. Set it by hand from the road or satellite view.');
+    return;
+  }
+  for (const opening of openings) {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.innerHTML = `<div class="result-name"></div><div class="result-meta"></div>`;
+    button.querySelector('.result-name').textContent =
+      `Opening ${formatDistance(opening.distance, state.settings.units)} before the exit`;
+    button.querySelector('.result-meta').textContent = [
+      opening.road,
+      `${formatDistance(opening.length, state.settings.units)} long`,
+      'from OpenStreetMap — check it against the road',
+    ]
+      .filter(Boolean)
+      .join(' • ');
+    button.addEventListener('click', () => {
+      setGate({ lat: opening.lat, lon: opening.lon });
+      el.gateResults.hidden = true;
+      el.gateResults.innerHTML = '';
+      toast('Opening set. Confirm it matches the striping on your first run.');
+    });
+    li.append(button);
+    el.gateResults.append(li);
+  }
+  el.gateResults.hidden = false;
+}
 
 el.gateClearBtn.addEventListener('click', () => {
   const { gate, ...withoutGate } = state.target;

@@ -27,13 +27,21 @@ def read(name):
 
 
 def bundled_script():
-    """nav.js + app.js as one inline module."""
+    """nav.js + openings.js + app.js as one inline module."""
     nav = read("nav.js")
+    openings = read("openings.js")
     app = read("app.js")
 
     # Inlining removes the module boundary, so the export/import pair goes too.
     nav = re.sub(r"^export (?=const|function|class)", "", nav, flags=re.MULTILINE)
-    app = re.sub(r"^import \{[\s\S]*?\} from '\./nav\.js';\n", "", app, count=1)
+    openings = re.sub(r"^export (?=const|function|class)", "", openings, flags=re.MULTILINE)
+    # MULTILINE matters: these imports do not all sit at the top of their file.
+    strip = lambda src, mod: re.sub(
+        r"^import \{[\s\S]*?\} from '\./" + mod + r"\.js';\n", "", src, count=1, flags=re.MULTILINE
+    )
+    openings = strip(openings, "nav")
+    app = strip(app, "nav")
+    app = strip(app, "openings")
 
     # There is no sw.js beside a single-file build, and registering it would
     # just 404 in the console.
@@ -43,12 +51,22 @@ def bundled_script():
     if not swept:
         raise SystemExit("service worker registration not found — check the pattern")
 
+    if "from './openings.js'" in app:
+        raise SystemExit("app.js still imports openings.js after stripping")
+    if "from './nav.js'" in openings:
+        raise SystemExit("openings.js still imports nav.js after stripping")
+    if re.search(r"^export ", openings, flags=re.MULTILINE):
+        raise SystemExit("openings.js still has exports after stripping")
     if "from './nav.js'" in app:
         raise SystemExit("app.js still imports nav.js after stripping — check the pattern")
     if re.search(r"^export ", nav, flags=re.MULTILINE):
         raise SystemExit("nav.js still has exports after stripping — check the pattern")
 
-    return f"/* --- nav.js --- */\n{nav}\n/* --- app.js --- */\n{app}"
+    return (
+        f"/* --- nav.js --- */\n{nav}\n"
+        f"/* --- openings.js --- */\n{openings}\n"
+        f"/* --- app.js --- */\n{app}"
+    )
 
 
 def data_uri(name):
