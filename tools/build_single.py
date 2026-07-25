@@ -75,7 +75,7 @@ def data_uri(name):
 
 
 def build():
-    html = read("index.html")
+    html = read("index.html").replace("__BUILD__", "single-file")
     icon = data_uri("icons/icon-180.png")
 
     # The bundle has no service worker and no separate files to fetch.

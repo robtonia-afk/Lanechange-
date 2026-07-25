@@ -2,7 +2,7 @@
  * Offline shell. Bump CACHE when any shell file changes, otherwise the phone
  * keeps serving the old copy.
  */
-const CACHE = 'lanechange-v2';
+const CACHE = 'lanechange-v3';
 
 const SHELL = [
   './',
@@ -41,18 +41,22 @@ self.addEventListener('fetch', (event) => {
   // Geocoding is live-only; never serve a stale search from cache.
   if (url.origin !== self.location.origin) return;
 
+  // Network first, cache only as a fallback.
+  //
+  // Cache-first is the usual advice, but it means a bad build stays on the
+  // phone until someone clears it by hand -- and a broken app cannot tell you
+  // how to fix it. For a driving app that is nearly always online, a slightly
+  // slower launch is a good trade for never being stuck on a broken copy.
+  // Offline still works: the fallback below serves the last good response.
   event.respondWith(
-    caches.match(request).then((hit) => {
-      if (hit) {
-        // Refresh in the background so the next launch has the newest build.
-        event.waitUntil(
-          fetch(request)
-            .then((fresh) => fresh.ok && caches.open(CACHE).then((c) => c.put(request, fresh.clone())))
-            .catch(() => {}),
-        );
-        return hit;
-      }
-      return fetch(request).catch(() => caches.match('./index.html'));
-    }),
+    fetch(request)
+      .then((fresh) => {
+        if (fresh.ok) {
+          const copy = fresh.clone();
+          event.waitUntil(caches.open(CACHE).then((c) => c.put(request, copy)));
+        }
+        return fresh;
+      })
+      .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html'))),
   );
 });

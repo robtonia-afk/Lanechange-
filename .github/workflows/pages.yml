@@ -51,6 +51,8 @@ jobs:
             esac
             cp -r "$item" _site/
           done
+          # Stamp the build so a stale copy is identifiable at a glance.
+          sed -i "s/__BUILD__/${GITHUB_SHA:0:7}/" _site/index.html
           ls -R _site
 
       - name: Check the site is complete

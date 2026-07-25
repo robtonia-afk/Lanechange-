@@ -269,3 +269,15 @@ summary h2 { display: inline; }
   box-shadow: 0 10px 30px #0009;
   z-index: 10;
 }
+
+/* Shown until the app boots; the running app removes it. */
+.boot-error {
+  margin: calc(var(--safe-top) + 16px) var(--pad) 0;
+  padding: 16px;
+  border: 1px solid #7a2b2b;
+  background: #2a0f0f;
+  border-radius: 14px;
+  color: #ffdede;
+}
+.boot-error p { margin: 6px 0 12px; font-size: 14px; color: #f0bcbc; }
+.boot-error button { background: #ffdede; color: #2a0f0f; }

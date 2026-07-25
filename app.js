@@ -823,6 +823,12 @@ renderSettings();
 renderSaved();
 renderSelected();
 
+// Reaching this line means the module graph loaded and ran, so the standing
+// failure notice can go, and the build stamp tells us which copy is running.
+document.getElementById('bootError')?.remove();
+const build = document.querySelector('meta[name="build"]')?.content;
+if (build) $('buildStamp').textContent = build;
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => { /* offline cache is optional */ });

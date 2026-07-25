@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="description" content="Tells you when to get out of the HOV lane so you don't miss your exit.">
 <meta name="theme-color" content="#0b1220">
+<meta name="build" content="__BUILD__">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,6 +17,34 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
+<!-- Visible until the app boots. If the scripts fail to load there is nothing
+     left to report the problem, so the page says so by default and the running
+     app is what removes this. -->
+<div class="boot-error" id="bootError">
+  <strong>The app didn't finish loading.</strong>
+  <p>Usually a stale copy saved on the phone. Reset clears it and reloads.</p>
+  <button type="button" onclick="lcReset()">Reset and reload</button>
+</div>
+
+<!-- Deliberately a classic script, not a module: it has to keep working when
+     the module graph is the thing that is broken. -->
+<script>
+  function lcReset() {
+    var done = 0;
+    var go = function () { if (++done >= 2) location.reload(); };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+        .then(go, go);
+    } else { go(); }
+    if (window.caches) {
+      caches.keys()
+        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+        .then(go, go);
+    } else { go(); }
+  }
+</script>
 
 <!-- ============ LIVE VIEW: what you see while driving ============ -->
 <main id="live" class="live" data-stage="idle" hidden>
@@ -166,7 +195,7 @@
       the real road distance — leave yourself margin. Watch the road and the signs;
       this is a reminder, not a navigator.
     </p>
-    <p class="attrib">Search by <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> / Nominatim.</p>
+    <p class="attrib">Build <span id="buildStamp">—</span> • Search by <a href="https://openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> / Nominatim.</p>
   </footer>
 </main>
 
