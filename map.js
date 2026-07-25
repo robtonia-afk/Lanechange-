@@ -62,26 +62,32 @@ export const LAYERS = {
 };
 
 /**
- * Which tiles cover a viewport, and where each one sits.
- * Pure, so the covering logic is testable without a browser.
+ * Which tiles cover a viewport, and where and how big each one is drawn.
+ *
+ * `zoom` is fractional so the view can scale continuously; tiles themselves
+ * only exist at whole zoom levels, so they are drawn from `tileZoom` and
+ * stretched by the difference. That is what makes pinching smooth instead of
+ * jumping a factor of two at a time.
  */
-export function visibleTiles(center, zoom, width, height) {
-  const centerX = lonToTileX(center.lon, zoom) * TILE_SIZE;
-  const centerY = latToTileY(center.lat, zoom) * TILE_SIZE;
+export function visibleTiles(center, zoom, width, height, tileZoom = Math.round(zoom)) {
+  const size = TILE_SIZE * 2 ** (zoom - tileZoom);
+  const centerX = lonToTileX(center.lon, tileZoom) * size;
+  const centerY = latToTileY(center.lat, tileZoom) * size;
   const originX = centerX - width / 2;
   const originY = centerY - height / 2;
-  const span = 2 ** zoom;
+  const span = 2 ** tileZoom;
 
   const tiles = [];
-  for (let tx = Math.floor(originX / TILE_SIZE); tx <= Math.floor((originX + width) / TILE_SIZE); tx++) {
-    for (let ty = Math.floor(originY / TILE_SIZE); ty <= Math.floor((originY + height) / TILE_SIZE); ty++) {
+  for (let tx = Math.floor(originX / size); tx <= Math.floor((originX + width) / size); tx++) {
+    for (let ty = Math.floor(originY / size); ty <= Math.floor((originY + height) / size); ty++) {
       if (ty < 0 || ty >= span) continue; // above the pole or below it
       tiles.push({
         x: ((tx % span) + span) % span, // wrap around the date line
         y: ty,
-        z: zoom,
-        left: tx * TILE_SIZE - originX,
-        top: ty * TILE_SIZE - originY,
+        z: tileZoom,
+        left: tx * size - originX,
+        top: ty * size - originY,
+        size,
       });
     }
   }
@@ -115,6 +121,8 @@ export class TileMap {
     this.layer = opts.layer ?? 'satellite';
     this.onChange = opts.onChange ?? (() => {});
     this.tiles = new Map();
+    this.retiring = new Map();
+    this.frame = 0;
 
     this.surface = document.createElement('div');
     this.surface.className = 'map-surface';
@@ -128,27 +136,44 @@ export class TileMap {
     this.render();
   }
 
-  get maxZoom() {
+  /** Tiles stop at the provider's limit; the view may go a little past it. */
+  get tileMaxZoom() {
     return LAYERS[this.layer].maxZoom;
+  }
+
+  get maxZoom() {
+    // A bit of over-zoom past native resolution: blurrier, but it lets you
+    // place the crosshair on a stripe rather than near it.
+    return this.tileMaxZoom + 1.5;
   }
 
   setLayer(name) {
     if (!LAYERS[name]) return;
     this.layer = name;
     this.zoom = Math.min(this.zoom, this.maxZoom);
+    for (const timer of this.retiring.values()) clearTimeout(timer);
+    this.retiring.clear();
+    for (const img of this.tiles.values()) img.remove();
     this.tiles.clear();
-    this.surface.replaceChildren();
     this.render();
   }
 
   setCenter(center, zoom) {
     this.center = center;
-    if (zoom != null) this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+    if (zoom != null) this.zoom = this.clampZoom(zoom);
     this.render();
   }
 
+  clampZoom(zoom) {
+    return Math.max(this.minZoom, Math.min(this.maxZoom, zoom));
+  }
+
   zoomBy(delta) {
-    const next = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom + delta));
+    this.zoomTo(this.zoom + delta);
+  }
+
+  zoomTo(zoom) {
+    const next = this.clampZoom(zoom);
     if (next === this.zoom) return;
     this.zoom = next;
     this.render();
@@ -171,23 +196,19 @@ export class TileMap {
         this.center = panned(this.center, this.zoom, previous.x - event.clientX, previous.y - event.clientY);
         this.render();
       } else if (this.pointers.size === 2 && this.pinchFrom) {
-        // Scale the whole surface during the gesture, then settle on a real
-        // zoom level when the fingers lift -- far smoother than re-tiling on
-        // every move event.
-        this.surface.style.transform = `scale(${this.spread() / this.pinchFrom.spread})`;
+        // Follow the fingers continuously. Snapping to whole levels at the end
+        // of the gesture makes every pinch feel like a lurch.
+        const ratio = this.spread() / this.pinchFrom.spread;
+        if (Number.isFinite(ratio) && ratio > 0) {
+          this.zoom = this.clampZoom(this.pinchFrom.zoom + Math.log2(ratio));
+          this.render();
+        }
       }
     });
 
     const release = (event) => {
       this.pointers.delete(event.pointerId);
-      if (this.pinchFrom && this.pointers.size < 2) {
-        const ratio = this.spread() / this.pinchFrom.spread || 1;
-        this.surface.style.transform = '';
-        this.pinchFrom = null;
-        if (Number.isFinite(ratio) && ratio > 0) {
-          this.zoomBy(Math.round(Math.log2(ratio)));
-        }
-      }
+      if (this.pointers.size < 2) this.pinchFrom = null;
       if (this.pointers.size === 0) this.onChange(this.center, this.zoom);
     };
     el.addEventListener('pointerup', release);
@@ -202,7 +223,8 @@ export class TileMap {
 
     el.addEventListener('wheel', (event) => {
       event.preventDefault();
-      this.zoomBy(event.deltaY < 0 ? 1 : -1);
+      // Proportional to the actual scroll, not one whole level per notch.
+      this.zoomBy(Math.max(-1, Math.min(1, -event.deltaY / 240)));
     }, { passive: false });
   }
 
@@ -212,13 +234,23 @@ export class TileMap {
     return Math.hypot(a.x - b.x, a.y - b.y) || 1;
   }
 
+  /** Coalesce bursts of pan/pinch events into one paint per frame. */
   render() {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      this.draw();
+    });
+  }
+
+  draw() {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
     if (!width || !height) return; // not on screen yet
 
     const source = LAYERS[this.layer];
-    const wanted = visibleTiles(this.center, this.zoom, width, height);
+    const tileZoom = Math.max(this.minZoom, Math.min(this.tileMaxZoom, Math.round(this.zoom)));
+    const wanted = visibleTiles(this.center, this.zoom, width, height, tileZoom);
     const keep = new Set();
 
     for (const tile of wanted) {
@@ -230,18 +262,38 @@ export class TileMap {
         img.className = 'map-tile';
         img.alt = '';
         img.decoding = 'async';
-        img.loading = 'eager';
+        // A tile that fails should leave a gap, not a broken-image icon.
+        img.addEventListener('error', () => { img.style.visibility = 'hidden'; });
         img.src = source.url(tile.z, tile.x, tile.y);
         this.tiles.set(key, img);
         this.surface.append(img);
       }
-      img.style.transform = `translate3d(${Math.round(tile.left)}px, ${Math.round(tile.top)}px, 0)`;
+      // Sub-pixel positions here, because rounding at fractional zoom leaves
+      // hairline seams between tiles.
+      img.style.width = `${tile.size}px`;
+      img.style.height = `${tile.size}px`;
+      img.style.transform = `translate3d(${tile.left}px, ${tile.top}px, 0)`;
+      img.style.zIndex = '2';
     }
 
+    // Tiles from the level we just left stay underneath until the new ones
+    // have arrived, so crossing a zoom boundary doesn't flash empty.
     for (const [key, img] of this.tiles) {
-      if (!keep.has(key)) {
-        img.remove();
-        this.tiles.delete(key);
+      if (keep.has(key)) continue;
+      img.style.zIndex = '1';
+      if (!this.retiring.has(key)) {
+        this.retiring.set(key, setTimeout(() => {
+          img.remove();
+          this.tiles.delete(key);
+          this.retiring.delete(key);
+        }, 400));
+      }
+    }
+    for (const key of keep) {
+      const timer = this.retiring.get(key);
+      if (timer) {
+        clearTimeout(timer);
+        this.retiring.delete(key);
       }
     }
 
@@ -249,6 +301,9 @@ export class TileMap {
   }
 
   destroy() {
+    if (this.frame) cancelAnimationFrame(this.frame);
+    for (const timer of this.retiring.values()) clearTimeout(timer);
+    this.retiring.clear();
     this.surface.remove();
     this.tiles.clear();
   }

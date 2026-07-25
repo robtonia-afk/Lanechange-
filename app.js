@@ -75,7 +75,8 @@ const el = {
   pickAttrib: $('pickAttrib'),
   pickCancelBtn: $('pickCancelBtn'),
   pickUseBtn: $('pickUseBtn'),
-  pickLayerBtn: $('pickLayerBtn'),
+  pickSatBtn: $('pickSatBtn'),
+  pickStreetBtn: $('pickStreetBtn'),
   pickLocateBtn: $('pickLocateBtn'),
   pickInBtn: $('pickInBtn'),
   pickOutBtn: $('pickOutBtn'),
@@ -290,10 +291,18 @@ async function pickOnMap({ title, start, onPick }) {
   requestAnimationFrame(() => map.render());
 
   const showLayer = () => {
-    el.pickLayerBtn.textContent = map.layer === 'satellite' ? 'Street' : 'Satellite';
+    el.pickSatBtn.setAttribute('aria-pressed', String(map.layer === 'satellite'));
+    el.pickStreetBtn.setAttribute('aria-pressed', String(map.layer === 'street'));
     el.pickAttrib.textContent = LAYERS[map.layer].attribution;
   };
   showLayer();
+
+  const chooseLayer = (name) => {
+    state.mapLayer = name;
+    saveJSON(STORE.mapLayer, name);
+    map.setLayer(name);
+    showLayer();
+  };
 
   const close = () => {
     map.destroy();
@@ -305,12 +314,8 @@ async function pickOnMap({ title, start, onPick }) {
     [el.pickCancelBtn, close],
     [el.pickInBtn, () => map.zoomBy(1)],
     [el.pickOutBtn, () => map.zoomBy(-1)],
-    [el.pickLayerBtn, () => {
-      state.mapLayer = map.layer === 'satellite' ? 'street' : 'satellite';
-      saveJSON(STORE.mapLayer, state.mapLayer);
-      map.setLayer(state.mapLayer);
-      showLayer();
-    }],
+    [el.pickSatBtn, () => chooseLayer('satellite')],
+    [el.pickStreetBtn, () => chooseLayer('street')],
     [el.pickLocateBtn, () => {
       el.pickLocateBtn.disabled = true;
       navigator.geolocation.getCurrentPosition(

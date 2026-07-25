@@ -360,3 +360,26 @@ summary h2 { display: inline; }
 .picker-controls { display: flex; gap: 8px; margin-left: auto; }
 #pickInBtn, #pickOutBtn { min-width: 44px; font-size: 18px; }
 .picker-attrib { flex: 1 1 100%; color: var(--muted); font-size: 11px; }
+
+/* Both map styles visible at once — a toggle labelled with the *other* style
+   reads as a statement of what you are looking at, not an offer to switch. */
+.segmented { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.segmented button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: #04101f; }
+
+/* Keep the top bar on one line — "Use this" wrapping mid-button looks broken. */
+.picker-bar button { white-space: nowrap; }
+.picker-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+}

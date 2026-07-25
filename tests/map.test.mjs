@@ -54,8 +54,8 @@ test('visibleTiles covers the viewport with the centre in the middle', () => {
   // Every pixel of the viewport must be inside some tile.
   const left = Math.min(...tiles.map((t) => t.left));
   const top = Math.min(...tiles.map((t) => t.top));
-  const right = Math.max(...tiles.map((t) => t.left + TILE_SIZE));
-  const bottom = Math.max(...tiles.map((t) => t.top + TILE_SIZE));
+  const right = Math.max(...tiles.map((t) => t.left + t.size));
+  const bottom = Math.max(...tiles.map((t) => t.top + t.size));
   assert.ok(left <= 0 && top <= 0, 'no gap at the top left');
   assert.ok(right >= 400 && bottom >= 700, 'no gap at the bottom right');
 
@@ -99,4 +99,42 @@ test('tile URLs follow each provider’s axis order', () => {
   // Esri puts y before x; getting this backwards silently serves wrong imagery.
   assert.match(LAYERS.satellite.url(17, 22539, 52350), /\/17\/52350\/22539$/);
   assert.match(LAYERS.street.url(17, 22539, 52350), /\/17\/22539\/52350\.png$/);
+});
+
+test('fractional zoom scales tiles instead of jumping a whole level', () => {
+  const whole = visibleTiles(LA, 17, 400, 700);
+  assert.equal(whole[0].size, TILE_SIZE, 'at a whole level tiles are native size');
+
+  // Half a level in: still drawn from z17 tiles, but bigger.
+  const half = visibleTiles(LA, 17.5, 400, 700, 17);
+  assert.ok(half[0].size > TILE_SIZE * 1.4 && half[0].size < TILE_SIZE * 1.42,
+    `expected about ${TILE_SIZE * 2 ** 0.5}, got ${half[0].size}`);
+  assert.ok(half.every((t) => t.z === 17), 'no tiles requested at a level that does not exist');
+});
+
+test('a fractional zoom step moves the view by less than a whole level', () => {
+  const at = (zoom) => {
+    const tiles = visibleTiles(LA, zoom, 400, 700, 17);
+    return tiles[0].size;
+  };
+  // The complaint was that every step doubled. Small steps must stay small.
+  const ratio = at(17.2) / at(17);
+  assert.ok(ratio > 1.1 && ratio < 1.2, `one small step scaled by ${ratio}, not 2`);
+});
+
+test('the viewport stays covered at fractional zoom', () => {
+  for (const zoom of [17, 17.3, 17.9, 18.4]) {
+    const tiles = visibleTiles(LA, zoom, 390, 660, Math.round(zoom));
+    const left = Math.min(...tiles.map((t) => t.left));
+    const top = Math.min(...tiles.map((t) => t.top));
+    const right = Math.max(...tiles.map((t) => t.left + t.size));
+    const bottom = Math.max(...tiles.map((t) => t.top + t.size));
+    assert.ok(left <= 0 && top <= 0 && right >= 390 && bottom >= 660, `gap at z${zoom}`);
+  }
+});
+
+test('over-zoom past the provider limit still draws from its top tiles', () => {
+  const tiles = visibleTiles(LA, 21, 400, 700, LAYERS.satellite.maxZoom);
+  assert.ok(tiles.every((t) => t.z === 20), 'never asks for a zoom level Esri lacks');
+  assert.ok(tiles[0].size > TILE_SIZE, 'upscaled rather than missing');
 });
